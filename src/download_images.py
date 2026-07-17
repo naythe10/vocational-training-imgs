@@ -1,40 +1,43 @@
-from bs4 import BeautifulSoup
+import os
 from urllib.parse import urljoin, urlparse
 import requests
 
-def download_images(images, folder_name):
-    count = 0
-    for i, image in enumerate(images):
 
-        #Find image src url, using these levels => 1)data-srcset 2)data-src 3)data-fallback-src 4)src
+def extract_image_url(image, base_url=None):
+    for key in ("data-srcset", "srcset", "data-src", "data-fallback-src", "src"):
+        value = image.get(key)
+        if value:
+            if key in {"data-srcset", "srcset"}:
+                value = value.split(",")[0].strip().split()[0]
+            if base_url:
+                return urljoin(base_url, value)
+            return value
+    return None
+
+
+def download_images(images, folder_name, base_url=None):
+    os.makedirs(folder_name, exist_ok=True)
+    successful_downloads = 0
+
+    for i, image in enumerate(images, start=1):
+        image_link = extract_image_url(image, base_url)
+        if not image_link or image_link.startswith("#"):
+            continue
+
         try:
-            image_link = image['data-srcset']
-        except:
-            try:
-                image_link = image['data-src']
-            except:
-                try:
-                    image_link = image['data-fallback-src']
-                except:
-                    try:
-                        image_src = image['src']
-                    except:
-                        pass
+            response = requests.get(image_link, timeout=20)
+            response.raise_for_status()
 
-        #Decode obtained link
-        try:
-            r = requests.get(image_link).content
-            try:
-                r = str(r, 'utf-8')
-            except UnicodeDecodeError:
-                with open(f"./{folder_name}/images{i+1}.jpg", "wb+") as f:
-                    f.write(r)
-                count += 1
-        except:
-            pass
+            extension = os.path.splitext(urlparse(image_link).path)[1] or ".jpg"
+            file_path = os.path.join(folder_name, f"image{i}{extension}")
 
-        #Image counter
-        if count == len(images):
-            print("All images have been downloaded.")
-        else:
-            print(f"Downloaded {count} out of {len(images)} images.")
+            with open(file_path, "wb") as file_handle:
+                file_handle.write(response.content)
+
+            successful_downloads += 1
+            print(f"Downloaded {successful_downloads} out of {len(images)} images.")
+        except requests.RequestException as exc:
+            print(f"Failed to download image {i}: {exc}")
+
+    if successful_downloads == len(images):
+        print("All images have been downloaded.")
